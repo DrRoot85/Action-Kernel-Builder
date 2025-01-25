@@ -6,12 +6,11 @@ on:
       KERNEL_BRANCH:
         description: 'KERNEL_BRANCH'
         required: true
-        default: 'next-5.15'
+        default: 'android13-5.15'
         type: choice
         options:
-        - next-5.15
-        - next-5.15-dev
-        - KernelSU-5.15
+        - KernelSU
+        - KernelSU-Next
 jobs:
   build:
     if: github.event.repository.owner.id == github.event.sender.id
