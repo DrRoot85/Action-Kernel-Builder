@@ -1,0 +1,111 @@
+name: Build Kernel CI
+
+on:
+  workflow_dispatch:
+   inputs:
+      KERNEL_BRANCH:
+        description: 'KERNEL_BRANCH'
+        required: true
+        default: 'android13-5.15'
+        type: choice
+        options:
+        - android13-5.15
+jobs:
+  build:
+    if: github.event.repository.owner.id == github.event.sender.id
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+    - name: Check Out
+      uses: actions/checkout@v4
+
+    - name: Cleanup
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: Set TimeZones
+      run: |
+        sudo timedatectl set-timezone Asia/Bangkok
+        sudo dpkg-reconfigure tzdata
+        echo "date=$(TZ=Asia/Bangkok date +%Y%m%d-%H%M)"
+        
+    - name: Prepare the environment
+      run: |
+        sudo apt update
+        sudo apt -y upgrade
+        sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev python3 bc bcc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev openjdk-11-jdk pahole dwarves bc cpio flex bison aptitude git python-is-python3 tar perl wget curl lz4 libelf-dev make aptitude libssl-dev openjdk-11-jdk
+        sudo apt -y install pahole libelf-dev
+        sudo apt -y install bc cpio flex bison git python-is-python3 tar perl wget curl lz4 libelf-dev
+      continue-on-error: true
+      
+    - name: Setup Aptitude
+      run: |
+        sudo apt -y install aptitude 
+        sudo aptitude -y install libssl-dev pahole
+      continue-on-error: true
+      
+    - name: Install OpenJDK
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'zulu'
+        java-version: '11'
+
+    - name: Install repo
+      run: |
+        mkdir ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        sudo ln -sf ~/bin/repo /usr/bin/repo
+
+    - name: Init Repo
+      run: |
+        export HOME=${GITHUB_WORKSPACE}
+        cd ${GITHUB_WORKSPACE}
+        git config --global user.name "archer-h61m"
+        git config --global user.email "archer.h61m@gmail.com"
+        
+    - name: Check Directory
+      run: |
+        cd ${GITHUB_WORKSPACE}
+        ls
+
+    - name: Clone Kernel Tree & Clang
+      run: |
+        cd ${GITHUB_WORKSPACE}
+        git clone -b ${{ github.event.inputs.KERNEL_BRANCH }} https://github.com/Bricked-Development/KLYN_Kernel_SM8550.git Kernel
+        cp ${GITHUB_WORKSPACE}/clang.sh ${GITHUB_WORKSPACE}/Kernel
+        cd ${GITHUB_WORKSPACE}/Kernel
+        chmod +x clang.sh
+        ./clang.sh
+
+    - name: Set Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 12
+
+    - name: Building Kernel
+      run: |
+        cd ${GITHUB_WORKSPACE}/Kernel
+        export ALLOW_MISSING_DEPENDENCIES=true
+        chmod +x build.sh
+        make clean ARCH=arm64 && make mrproper ARCH=arm64 && rm -rf out/
+        ./build.sh
+
+    - name: Set Variables
+      run: |
+        echo "date=$(TZ=Asia/Bangkok date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
+        echo "Outdir=${GITHUB_WORKSPACE}/Kernel/out/arch/arm64/boot/Image.gz" >> $GITHUB_OUTPUT
+      id: var
+
+    - name: Publish to GitHub
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ steps.var.outputs.Outdir }}
+        name: Release Kernel ${{ github.run_id }}
+        tag_name: ${{ github.run_id }}
+        body: |
+          Changelog : None
+      env:
+        GITHUB_TOKEN: ${{ secrets.TEST }}
+        
