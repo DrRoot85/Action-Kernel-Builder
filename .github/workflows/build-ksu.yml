@@ -64,8 +64,8 @@ jobs:
       run: |
         export HOME=${GITHUB_WORKSPACE}
         cd ${GITHUB_WORKSPACE}
-        git config --global user.name "archer-h61m"
-        git config --global user.email "archer.h61m@gmail.com"
+        git config --global user.name "DrRoot85"
+        git config --global user.email "mhbmis@icloud.com"
         
     - name: Check Directory
       run: |
@@ -75,39 +75,106 @@ jobs:
     - name: Clone Kernel Tree & Clang
       run: |
         cd ${GITHUB_WORKSPACE}
-        git clone -b ${{ github.event.inputs.KERNEL_BRANCH }} https://github.com/Bricked-Development/KLYN_Kernel_SM8550.git KernelSU
+        git clone -b ${{ github.event.inputs.KERNEL_BRANCH }} https://github.com/DrRoot85/kernel_samsung_sm8550-commom.git KernelSU
+        git clone -b ${{ github.event.inputs.KERNEL_BRANCH }} https://github.com/DrRoot85/Kernel_my_patches main
         cp ${GITHUB_WORKSPACE}/clang.sh ${GITHUB_WORKSPACE}/KernelSU
         cd ${GITHUB_WORKSPACE}/KernelSU
         chmod +x clang.sh
         ./clang.sh
-
+        cp ../Kernel_my_patches/build_ksu.sh .
+        cp ../Kernel_my_patches/Patch_to_build.sh .
+        chmod a+x build_ksu.sh
+        chmod a+x Patch_to_build.sh
+    
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 12
 
+    - name: 🔍 Check for KernelSU updates
+      id: check_for_updates
+      run: |
+          echo "Checking for KernelSU updates..."
+          REPO_URL="https://api.github.com/repos/tiann/KernelSU/commits/main"
+          RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" -H "Authorization: token ${{ secrets.MY_SECRET }}" "$REPO_URL")
+          
+          LATEST_COMMIT=$(echo "$RESPONSE" | jq -r '.sha')
+          if [ -z "$LATEST_COMMIT" ] || [ "$LATEST_COMMIT" == "null" ]; then
+            echo "Error: Unable to fetch the latest commit SHA for KernelSU."
+            exit 1
+          fi
+          echo "Latest KernelSU commit: $LATEST_COMMIT"
+          echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+
+          COMMIT_FILE="check_hashes/ksu_last_commit.txt"
+          STORED_COMMIT=$(cat $COMMIT_FILE 2>/dev/null || echo "")
+          if [ "$LATEST_COMMIT" != "$STORED_COMMIT" ]; then
+            echo "New KernelSU commit detected: $LATEST_COMMIT"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "$LATEST_COMMIT" > $COMMIT_FILE
+            cd check_hashes
+            git config --global user.name "DrRoot85"
+            git config --global user.email "mhbmis@icloud.com"
+            git add ksu_last_commit.txt
+            git commit -m "Update KernelSU commit hash to $LATEST_COMMIT"
+            git push origin main
+          else
+            echo "No new KernelSU commits."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
     - name: Building Kernel
       run: |
+        if: needs.check_for_updates.outputs.should_build == 'true'
         cd ${GITHUB_WORKSPACE}/KernelSU
         export ALLOW_MISSING_DEPENDENCIES=true
-        chmod +x build.sh
+        chmod a+x Patch_to_build.sh
+        ./Patch_to_build.sh
+        chmod a+x build_ksu.sh
         make clean ARCH=arm64 && make mrproper ARCH=arm64 && rm -rf out/
-        ./build.sh
+        ./build_ksu.sh
 
-    - name: Set Variables
-      run: |
-        echo "date=$(TZ=Asia/Bangkok date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
-        echo "Outdir=${GITHUB_WORKSPACE}/KernelSU/out/arch/arm64/boot/Image.gz" >> $GITHUB_OUTPUT
-      id: var
+    # - name: Set Variables
+    #   run: |
+    #     echo "date=$(TZ=Asia/Bangkok date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
+    #     echo "Outdir=${GITHUB_WORKSPACE}/KernelSU/out/arch/arm64/boot/Image.gz" >> $GITHUB_OUTPUT
+    #   id: var
 
-    - name: Publish to GitHub
+    # - name: Publish to GitHub
+    #   uses: softprops/action-gh-release@v1
+    #   with:
+    #     files: ${{ steps.var.outputs.Outdir }}
+    #     name: Release Kernel ${{ github.run_id }}
+    #     tag_name: ${{ github.run_id }}
+    #     body: |
+    #       Changelog : None
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.MY_SECRET }}
+
+
+
+    - name: 🚀 Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        files: ${{ steps.var.outputs.Outdir }}
-        name: Release Kernel ${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          Changelog : None
+          files: 5.15.176-DrRoot-KSU-SUSFS.zip
+          name: "Release Kernel ${{ github.run_id }}"
+          tag_name: ${{ github.run_id }}
+          body: |
+            Changelog: None
       env:
-        GITHUB_TOKEN: ${{ secrets.TEST }}
-        
+          GITHUB_TOKEN: ${{ secrets.MY_SECRET }}
+
+    - name: Push ZIP to KernelSU Branch
+      run: |
+          cd ${GITHUB_WORKSPACE}/KernelSU
+          git config --global user.name "DrRoot85"
+          git config --global user.email "mhbmis@icloud.com"
+          git init
+          git remote add origin https://github.com/DrRoot85/kernel_samsung_sm8550-commom.git
+          git fetch origin KernelSU
+          git checkout KernelSU
+          git add 5.15.176-DrRoot-KSU-SUSFS.zip
+          git commit -m "Add build artifact: 5.15.176-DrRoot-KSU-SUSFS.zip (Kernel ${{ github.run_id }})"
+          git push origin KernelSU
+      env:
+          GITHUB_TOKEN: ${{ secrets.MY_SECRET }}
