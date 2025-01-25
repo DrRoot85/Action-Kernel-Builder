@@ -13,7 +13,7 @@ on:
         - KernelSU-Next
 jobs:
   build:
-    if: github.event.repository.owner.id == github.event.sender.id
+    # if: github.event.repository.owner.id == github.event.sender.id
     runs-on: ubuntu-22.04
     permissions:
       contents: write
